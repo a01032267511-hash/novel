@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>내 소설 연재</title>
+<style>
+:root{--bg:#faf8f5;--fg:#222;--mut:#888;--card:#fff;--bd:#e6e1d8;--ac:#7a4cc2;--up:#2e8b57;--dn:#c0392b}
+@media(prefers-color-scheme:dark){:root{--bg:#17161a;--fg:#eee;--mut:#999;--card:#222126;--bd:#34323a;--ac:#a98bf0}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 -apple-system,"Apple SD Gothic Neo","Noto Sans KR",sans-serif}
+.w{max-width:680px;margin:0 auto;padding:16px}h1{font-size:22px;margin:8px 0 2px}.sub,.note{color:var(--mut);font-size:13px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:14px;margin-bottom:12px}
+.item{cursor:pointer;display:flex;justify-content:space-between;gap:10px;align-items:center}.item b{display:block}
+button{font:inherit;border:1px solid var(--bd);background:var(--card);color:var(--fg);border-radius:10px;padding:8px 14px;cursor:pointer}
+button.p{background:var(--ac);color:#fff;border-color:var(--ac)}button.s{padding:4px 10px;font-size:13px}
+button.up.on{background:var(--up);color:#fff}button.dn.on{background:var(--dn);color:#fff}
+input[type=text],input[type=email],input[type=password],textarea{width:100%;font:inherit;padding:10px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);color:var(--fg)}
+.imgs img{width:100%;display:block;margin-bottom:6px;border-radius:8px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:10px 0}
+.cm{border-top:1px solid var(--bd);padding:8px 0}.cm p{margin:2px 0;white-space:pre-wrap;word-break:break-word}
+</style></head><body><div class="w" id="app">불러오는 중…</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+// ▼▼ Supabase 프로젝트 설정 > API 에서 복사해 붙여넣기 ▼▼
+const SUPABASE_URL='https://ifjuiooaztllcwazjpft.supabase.co', SUPABASE_KEY='sb_publishable_jeex3-QGAfe0vTxSWEnXyw_DbmE8GJT';
+// ▲▲▲
+const sb=supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const img=p=>sb.storage.from('novel').getPublicUrl(p).data.publicUrl;
+const fmt=t=>new Date(t).toLocaleDateString('ko-KR');
+let me,admin=false,ch=[],rx=[],vw=[],cm=[],site={},openId=null,replyTo=null,draft=null;
+
+async function init(){
+  let {data:{session}}=await sb.auth.getSession();
+  if(!session){await sb.auth.signInAnonymously();({data:{session}}=await sb.auth.getSession())}
+  me=session.user.id;admin=!!session.user.email;
+  const h=location.hash.match(/c=(['w-]+)/);if(h)openId=h[1];
+  await load();
+}
+async function load(){
+  const [a,b,c,d,e]=await Promise.all([
+    sb.from('chapters').select('*').order('sort_key'),sb.from('reactions').select('*'),
+    sb.from('views').select('*'),sb.from('comments').select('*').order('created_at'),
+    sb.from('site').select('*').eq('id',1).maybeSingle()]);
+  ch=a.data||[];rx=b.data||[];vw=c.data||[];cm=d.data||[];site=e.data||{};render();
+}
+const stat=id=>{let u=0,d=0,m=0;rx.forEach(r=>{if(r.chapter_id===id){r.v===1?u++:d++;if(r.voter===me)m=r.v}});return{u,d,m}};
+const nv=id=>vw.filter(v=>v.chapter_id===id).length, nc=id=>cm.filter(c=>c.chapter_id===id).length;
+
+function render(){
+  const c=ch.find(x=>x.id===openId);
+  $('app').innerHTML=c?chapterView(c):listView();
+  const ec=$('ec');
+}
+function authBar(){return admin?'<button class="s" onclick="logout()">관리자 로그아웃</button>':'<a class="note" href="#" onclick="login();return false">관리자</a>'}
+function listView(){
+  let h=(site.cover?`<img src="${img(site.cover)}" style="width:100%;max-height:340px;object-fit:cover;border-radius:12px;margin-bottom:8px" alt="">`:'')+'<h1>📖 내 소설 연재</h1><div class="sub">새 회차가 올라오면 여기에 표시돼요</div>';
+  if(admin)h+='<div class="row"><button class="p" onclick="startNew()">+ 새 회차</button><label class="note">표지 변경 <input type="file" accept="image/*" onchange="setCover(this)"></label></div>';
+  if(draft&&!draft.id)h+=editor();
+  if(!ch.length)h+='<div class="card note">아직 올라온 회차가 없어요.</div>';
+  ch.forEach((c,i)=>{const s=stat(c.id);
+    h+=`<div class="card item" onclick="openCh('${c.id}')"><div><b>${esc(c.title)}</b><span class="note">${fmt(c.created_at)}${c.updated_at!==c.created_at?' · 수정됨':''}</span></div><div class="note" style="text-align:right">${admin?`<button class="s" onclick="event.stopPropagation();move(${i},-1)">↑</button> <button class="s" onclick="event.stopPropagation();move(${i},1)">↓</button><br>`:''}👁 ${nv(c.id)} · 👍 ${s.u} · 👎 ${s.d} · 💬 ${nc(c.id)}</div></div>`});
+  return h+'<div style="text-align:center;margin-top:20px">'+authBar()+'</div>';
+}
+function chapterView(c){
+  const s=stat(c.id);
+  let h=`<div class="row"><button onclick="back()">← 목록</button>${admin?`<button onclick="startEdit('${c.id}')">✏️ 수정</button><button onclick="delCh('${c.id}')">삭제</button>`:''}</div>`;
+  if(draft&&draft.id===c.id)return h+editor();
+  h+=`<h1>${esc(c.title)}</h1><div class="sub">${fmt(c.created_at)} · 👁 ${nv(c.id)}</div><div class="imgs">${(c.images||[]).map(p=>`<img src="${img(p)}" loading="lazy" alt="">`).join('')}</div>`;
+  h+=`<div class="row"><button class="up ${s.m===1?'on':''}" onclick="vote('${c.id}',1)">👍 좋아요 ${s.u}</button><button class="dn ${s.m===-1?'on':''}" onclick="vote('${c.id}',-1)">👎 싫어요 ${s.d}</button></div>`;
+  const all=cm.filter(x=>x.chapter_id===c.id),tops=all.filter(x=>!x.parent);
+  const one=(x,sub)=>`<div class="cm" style="${sub?'margin-left:20px':''}"><span class="note">${esc(x.nick)} · ${fmt(x.created_at)}${sub?'':` · <a href="#" onclick="setReply('${x.id}');return false">답글</a>`}${(x.author===me||admin)?` · <a href="#" onclick="delC('${x.id}');return false">삭제</a>`:''}</span><p>${esc(x.body)}</p></div>`;
+  h+=`<h3>댓글 ${all.length}</h3><div class="card"><input type="text" id="nick" placeholder="닉네임" maxlength="20" value="${esc(localStorage.nick||'')}"><div style="height:8px"></div><textarea id="cin" placeholder="댓글을 남겨보세요" maxlength="500"></textarea><div class="row"><button class="p" onclick="addC('${c.id}',null,'cin')">등록</button></div>`;
+  for(const x of tops){h+=one(x,false);all.filter(y=>y.parent===x.id).forEach(r=>h+=one(r,true));
+    if(replyTo===x.id)h+=`<div class="cm" style="margin-left:20px"><textarea id="rin" placeholder="답글" maxlength="500"></textarea><div class="row"><button class="p s" onclick="addC('${c.id}','${x.id}','rin')">답글 등록</button><button class="s" onclick="setReply(null)">취소</button></div></div>`}
+  return h+'</div>';
+}
+function editor(){return `<div class="card"><b>${draft.id?'회차 수정':'새 회차'}</b><div class="row"><input type="text" id="et" placeholder="제목 (예: 1화)" value="${esc(draft.title)}"></div><div class="imgs">${draft.images.map((p,n)=>`<div style="position:relative"><img src="${img(p)}" alt=""><button class="s" style="position:absolute;top:8px;right:8px" onclick="rmImg(${n})">✕</button></div>`).join('')}</div><div class="row"><input type="file" id="ef" accept="image/*" multiple></div><div class="note" id="est"></div><div class="row"><button class="p" onclick="saveCh()">저장</button><button onclick="draft=null;render()">취소</button></div></div>`}
+
+function openCh(id){openId=id;replyTo=null;draft=null;location.hash='c='+id;render();scrollTo(0,0);
+  if(!vw.some(v=>v.chapter_id===id&&v.voter===me))sb.from('views').insert({chapter_id:id}).then(load)}
+function back(){openId=null;draft=null;history.replaceState(0,'',location.pathname);render()}
+function setReply(id){replyTo=id;render()}
+function startNew(){draft={title:'',images:[]};render()}
+function startEdit(id){const c=ch.find(x=>x.id===id);draft={id,title:c.title,images:[...c.images]};render()}
+function rmImg(n){draft.title=$('et').value;draft.images.splice(n,1);render()}
+async function up(f){const p=crypto.randomUUID()+'.'+(f.name.split('.').pop()||'jpg');const {error}=await sb.storage.from('novel').upload(p,f);if(error)throw error;return p}
+async function saveCh(){
+  draft.title=$('et').value.trim()||'제목 없음';const fs=$('ef').files,st=$('est');
+  try{for(let i=0;i<fs.length;i++){st.textContent=`업로드 중 ${i+1}/${fs.length}`;draft.images.push(await up(fs[i]))}
+    const r=draft.id?await sb.from('chapters').update({title:draft.title,images:draft.images,updated_at:new Date().toISOString()}).eq('id',draft.id)
+      :await sb.from('chapters').insert({title:draft.title,images:draft.images});
+    if(r.error)throw r.error;draft=null;await load()}catch(e){st.textContent='실패: '+e.message}
+}
+async function delCh(id){if(confirm('삭제할까요?')){await sb.from('chapters').delete().eq('id',id);openId=null;await load()}}
+async function move(i,d){const a=ch[i],b=ch[i+d];if(!b)return;
+  await sb.from('chapters').update({sort_key:b.sort_key}).eq('id',a.id);await sb.from('chapters').update({sort_key:a.sort_key}).eq('id',b.id);load()}
+async function setCover(el){const f=el.files[0];if(!f)return;try{await sb.from('site').update({cover:await up(f)}).eq('id',1);load()}catch(e){alert('실패: '+e.message)}}
+async function vote(id,v){const s=stat(id);
+  if(s.m===v)await sb.from('reactions').delete().eq('chapter_id',id).eq('voter',me);
+  else await sb.from('reactions').upsert({chapter_id:id,voter:me,v});load()}
+async function addC(id,parent,box){const t=$(box).value.trim();if(!t)return;
+  const nick=($('nick')?.value||'').trim()||'익명';localStorage.nick=nick;
+  await sb.from('comments').insert({chapter_id:id,parent,nick:admin?'작가':nick,body:t});replyTo=null;load()}
+async function delC(id){await sb.from('comments').delete().eq('id',id);load()}
+async function login(){const e=prompt('관리자 이메일'),p=e&&prompt('비밀번호');if(!p)return;
+  const {data,error}=await sb.auth.signInWithPassword({email:e,password:p});if(error)return alert('로그인 실패');me=data.user.id;admin=true;load()}
+async function logout(){await sb.auth.signOut();await sb.auth.signInAnonymously();const {data:{session}}=await sb.auth.getSession();me=session.user.id;admin=false;load()}
+init();
+</script></body></html>
